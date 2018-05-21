@@ -46,6 +46,8 @@ static DEFINE_PER_CPU(struct cpufreq_policy *, cpufreq_cpu_data);
 #ifdef CONFIG_HOTPLUG_CPU
 /* This one keeps track of the previously set governor of a removed CPU */
 static DEFINE_PER_CPU(char[CPUFREQ_NAME_LEN], cpufreq_cpu_governor);
+static DEFINE_PER_CPU(unsigned int, cpu_min_freq);
+static DEFINE_PER_CPU(unsigned int, cpu_max_freq);
 #endif
 static DEFINE_RWLOCK(cpufreq_driver_lock);
 
@@ -878,6 +880,7 @@ static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
 #ifdef CONFIG_HOTPLUG_CPU
 	struct cpufreq_governor *gov;
 	int sibling;
+	int min, max;
 #endif
 
 	if (cpu_is_offline(cpu))
@@ -950,6 +953,20 @@ static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
 	 * managing offline cpus here.
 	 */
 	cpumask_and(policy->cpus, policy->cpus, cpu_online_mask);
+
+#ifdef CONFIG_HOTPLUG_CPU
+	min = per_cpu(cpu_min_freq, cpu);
+	if (min) {
+		policy->min = per_cpu(cpu_min_freq, cpu);
+		pr_debug("Restoring %d min freq for cpu %d\n", policy->min, cpu);
+	}
+
+	max = per_cpu(cpu_max_freq, cpu);
+	if (max) {
+		policy->max = per_cpu(cpu_max_freq, cpu);
+		pr_debug("Restoring %d max freq for cpu %d\n", policy->max, cpu);
+	}
+#endif
 
 	policy->user_policy.min = policy->min;
 	policy->user_policy.max = policy->max;
@@ -1050,9 +1067,12 @@ static int __cpufreq_remove_dev(struct device *dev, struct subsys_interface *sif
 		__cpufreq_governor(data, CPUFREQ_GOV_STOP);
 
 #ifdef CONFIG_HOTPLUG_CPU
-	if (!cpufreq_driver->setpolicy)
+	if (!cpufreq_driver->setpolicy) {
 		strncpy(per_cpu(cpufreq_cpu_governor, cpu),
 			data->governor->name, CPUFREQ_NAME_LEN);
+		per_cpu(cpu_min_freq, cpu) = data->min;
+		per_cpu(cpu_max_freq, cpu) = data->max;
+	}
 #endif
 
 	WARN_ON(lock_policy_rwsem_write(cpu));
